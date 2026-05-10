@@ -20,8 +20,8 @@ require (
 	github.com/hashicorp/go-getter v1.7.9
 	github.com/hashicorp/go-metrics v0.5.4
 	github.com/spf13/cast v1.9.2
-	github.com/spf13/cobra v1.9.1
-	github.com/spf13/pflag v1.0.7
+	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20250528174236-200df99c418a
