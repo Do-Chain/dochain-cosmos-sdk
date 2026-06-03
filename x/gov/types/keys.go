@@ -23,6 +23,7 @@ var (
 	VotingPeriodProposalKeyPrefix = collections.NewPrefix(4)  // VotingPeriodProposalKeyPrefix stores which proposals are on voting period.
 	DepositsKeyPrefix             = collections.NewPrefix(16) // DepositsKeyPrefix stores deposits.
 	VotesKeyPrefix                = collections.NewPrefix(32) // VotesKeyPrefix stores the votes of proposals.
+	ProposalBackersKeyPrefix      = collections.NewPrefix(33) // ProposalBackersKeyPrefix stores validator backing during phase one.
 	ParamsKey                     = collections.NewPrefix(48) // ParamsKey stores the module's params.
 	ConstitutionKey               = collections.NewPrefix(49) // ConstitutionKey stores a chain's constitution.
 )

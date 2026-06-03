@@ -5,15 +5,19 @@ const (
 	EventTypeSubmitProposal   = "submit_proposal"
 	EventTypeProposalDeposit  = "proposal_deposit"
 	EventTypeProposalVote     = "proposal_vote"
+	EventTypeProposalBacking  = "proposal_backing"
 	EventTypeInactiveProposal = "inactive_proposal"
 	EventTypeActiveProposal   = "active_proposal"
 	EventTypeCancelProposal   = "cancel_proposal"
 
 	AttributeKeyProposalResult              = "proposal_result"
 	AttributeKeyVoter                       = "voter"
+	AttributeKeyBacker                      = "backer"
 	AttributeKeyOption                      = "option"
 	AttributeKeyProposalID                  = "proposal_id"
 	AttributeKeyDepositor                   = "depositor"
+	AttributeKeyBackingCount                = "backing_count"
+	AttributeKeyBondedValidatorCount        = "bonded_validator_count"
 	AttributeKeyProposalMessages            = "proposal_messages" // Msg type_urls in the proposal
 	AttributeKeyVotingPeriodStart           = "voting_period_start"
 	AttributeKeyProposalLog                 = "proposal_log"                // log of proposal execution

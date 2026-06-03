@@ -54,6 +54,7 @@ type Keeper struct {
 	Params                 collections.Item[v1.Params]
 	Deposits               collections.Map[collections.Pair[uint64, sdk.AccAddress], v1.Deposit]
 	Votes                  collections.Map[collections.Pair[uint64, sdk.AccAddress], v1.Vote]
+	ProposalBackers        collections.Map[collections.Pair[uint64, sdk.AccAddress], []byte]
 	ProposalID             collections.Sequence
 	Proposals              collections.Map[uint64, v1.Proposal]
 	ActiveProposalsQueue   collections.Map[collections.Pair[time.Time, uint64], uint64] // TODO(tip): this should be simplified and go into an index.
@@ -122,6 +123,7 @@ func NewKeeper(
 		Params:                               collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[v1.Params](cdc)),
 		Deposits:                             collections.NewMap(sb, types.DepositsKeyPrefix, "deposits", collections.PairKeyCodec(collections.Uint64Key, sdk.LengthPrefixedAddressKey(sdk.AccAddressKey)), codec.CollValue[v1.Deposit](cdc)), // nolint:staticcheck // sdk.LengthPrefixedAddressKey is needed to retain state compatibility
 		Votes:                                collections.NewMap(sb, types.VotesKeyPrefix, "votes", collections.PairKeyCodec(collections.Uint64Key, sdk.LengthPrefixedAddressKey(sdk.AccAddressKey)), codec.CollValue[v1.Vote](cdc)),          // nolint:staticcheck // sdk.LengthPrefixedAddressKey is needed to retain state compatibility
+		ProposalBackers:                      collections.NewMap(sb, types.ProposalBackersKeyPrefix, "proposal_backers", collections.PairKeyCodec(collections.Uint64Key, sdk.LengthPrefixedAddressKey(sdk.AccAddressKey)), collections.BytesValue),
 		ProposalID:                           collections.NewSequence(sb, types.ProposalIDKey, "proposal_id"),
 		Proposals:                            collections.NewMap(sb, types.ProposalsKeyPrefix, "proposals", collections.Uint64Key, codec.CollValue[v1.Proposal](cdc)),
 		ActiveProposalsQueue:                 collections.NewMap(sb, types.ActiveProposalQueuePrefix, "active_proposals_queue", collections.PairKeyCodec(sdk.TimeKey, collections.Uint64Key), collections.Uint64Value),     // nolint:staticcheck // sdk.TimeKey is needed to retain state compatibility

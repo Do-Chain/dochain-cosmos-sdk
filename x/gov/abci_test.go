@@ -307,6 +307,7 @@ func TestTickPassedVotingPeriod(t *testing.T) {
 			res1, err := govMsgSvr.Deposit(ctx, newDepositMsg)
 			require.NoError(t, err)
 			require.NotNil(t, res1)
+			activateProposalForTest(t, ctx, suite.GovKeeper, proposalID)
 
 			params, _ := suite.GovKeeper.Params.Get(ctx)
 			votingPeriod := params.VotingPeriod
@@ -391,6 +392,7 @@ func TestProposalPassedEndblocker(t *testing.T) {
 
 			proposal, err := suite.GovKeeper.SubmitProposal(ctx, []sdk.Msg{mkTestLegacyContent(t)}, "", "title", "summary", proposer, tc.expedited)
 			require.NoError(t, err)
+			backProposalForTest(t, ctx, suite.GovKeeper, proposal.Id, addrs[0])
 
 			proposalCoins := sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, suite.StakingKeeper.TokensFromConsensusPower(ctx, 10*depositMultiplier))}
 			newDepositMsg := v1.NewMsgDeposit(addrs[0], proposal.Id, proposalCoins)
@@ -406,8 +408,7 @@ func TestProposalPassedEndblocker(t *testing.T) {
 			deposits := initialModuleAccCoins.Add(proposal.TotalDeposit...).Add(proposalCoins...)
 			require.True(t, moduleAccCoins.Equal(deposits))
 
-			err = suite.GovKeeper.AddVote(ctx, proposal.Id, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), "")
-			require.NoError(t, err)
+			delegateAndVoteForTest(t, stakingMsgSvr, suite.GovKeeper, ctx, addrs[1], valAddr, proposal.Id, 1, "")
 
 			newHeader := ctx.BlockHeader()
 			params, _ := suite.GovKeeper.Params.Get(ctx)
@@ -427,7 +428,7 @@ func TestEndBlockerProposalHandlerFailed(t *testing.T) {
 	suite := createTestSuite(t)
 	app := suite.App
 	ctx := app.NewContext(false)
-	addrs := simtestutil.AddTestAddrs(suite.BankKeeper, suite.StakingKeeper, ctx, 1, valTokens)
+	addrs := simtestutil.AddTestAddrs(suite.BankKeeper, suite.StakingKeeper, ctx, 2, valTokens)
 
 	SortAddresses(addrs)
 
@@ -449,6 +450,7 @@ func TestEndBlockerProposalHandlerFailed(t *testing.T) {
 	msg := banktypes.NewMsgSend(authtypes.NewModuleAddress(types.ModuleName), addrs[0], sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(100000))))
 	proposal, err := suite.GovKeeper.SubmitProposal(ctx, []sdk.Msg{msg}, "", "title", "summary", proposer, false)
 	require.NoError(t, err)
+	backProposalForTest(t, ctx, suite.GovKeeper, proposal.Id, addrs[0])
 
 	proposalCoins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, suite.StakingKeeper.TokensFromConsensusPower(ctx, 10)))
 	newDepositMsg := v1.NewMsgDeposit(addrs[0], proposal.Id, proposalCoins)
@@ -458,8 +460,7 @@ func TestEndBlockerProposalHandlerFailed(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
-	err = suite.GovKeeper.AddVote(ctx, proposal.Id, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), "")
-	require.NoError(t, err)
+	delegateAndVoteForTest(t, stakingMsgSvr, suite.GovKeeper, ctx, addrs[1], valAddr, proposal.Id, 1, "")
 
 	params, _ := suite.GovKeeper.Params.Get(ctx)
 	newHeader := ctx.BlockHeader()
@@ -552,6 +553,7 @@ func TestExpeditedProposal_PassAndConversionToRegular(t *testing.T) {
 			require.NotNil(t, res)
 
 			proposalID := res.ProposalId
+			backProposalForTest(t, ctx, suite.GovKeeper, proposalID, addrs[0])
 
 			newHeader := ctx.BlockHeader()
 			newHeader.Time = ctx.BlockHeader().Time.Add(time.Duration(1) * time.Second)
@@ -575,9 +577,8 @@ func TestExpeditedProposal_PassAndConversionToRegular(t *testing.T) {
 			require.Equal(t, v1.StatusVotingPeriod, proposal.Status)
 
 			if tc.expeditedPasses {
-				// Validator votes YES, letting the expedited proposal pass.
-				err = suite.GovKeeper.AddVote(ctx, proposal.Id, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), "metadata")
-				require.NoError(t, err)
+				// A public delegator votes YES, letting the expedited proposal pass.
+				delegateAndVoteForTest(t, stakingMsgSvr, suite.GovKeeper, ctx, addrs[2], valAddr, proposal.Id, 1, "metadata")
 			}
 
 			// Here the expedited proposal is converted to regular after expiry.
@@ -630,9 +631,8 @@ func TestExpeditedProposal_PassAndConversionToRegular(t *testing.T) {
 			checkActiveProposalsQueue(t, ctx, suite.GovKeeper)
 
 			if tc.regularEventuallyPassing {
-				// Validator votes YES, letting the converted regular proposal pass.
-				err = suite.GovKeeper.AddVote(ctx, proposal.Id, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), "metadata")
-				require.NoError(t, err)
+				// A public delegator votes YES, letting the converted regular proposal pass.
+				delegateAndVoteForTest(t, stakingMsgSvr, suite.GovKeeper, ctx, addrs[2], valAddr, proposal.Id, 1, "metadata")
 			}
 
 			// Here we validate the converted regular proposal
@@ -686,6 +686,50 @@ func createValidators(t *testing.T, stakingMsgSvr stakingtypes.MsgServer, ctx sd
 		require.NoError(t, err)
 		require.NotNil(t, res)
 	}
+}
+
+func activateProposalForTest(t *testing.T, ctx sdk.Context, govKeeper *keeper.Keeper, proposalID uint64) {
+	t.Helper()
+
+	proposal, err := govKeeper.Proposals.Get(ctx, proposalID)
+	require.NoError(t, err)
+	if proposal.Status == v1.StatusVotingPeriod {
+		return
+	}
+
+	require.NoError(t, govKeeper.ActivateVotingPeriod(ctx, proposal))
+}
+
+func backProposalForTest(t *testing.T, ctx sdk.Context, govKeeper *keeper.Keeper, proposalID uint64, validator sdk.AccAddress) {
+	t.Helper()
+
+	err := govKeeper.AddVote(ctx, proposalID, validator, v1.NewNonSplitVoteOption(v1.OptionYes), "")
+	require.NoError(t, err)
+}
+
+func delegateAndVoteForTest(
+	t *testing.T,
+	stakingMsgSvr stakingtypes.MsgServer,
+	govKeeper *keeper.Keeper,
+	ctx sdk.Context,
+	voter sdk.AccAddress,
+	validator sdk.ValAddress,
+	proposalID uint64,
+	power int64,
+	metadata string,
+) {
+	t.Helper()
+
+	delegateMsg := stakingtypes.NewMsgDelegate(
+		voter.String(),
+		validator.String(),
+		sdk.NewCoin(sdk.DefaultBondDenom, sdk.TokensFromConsensusPower(power, sdk.DefaultPowerReduction)),
+	)
+	_, err := stakingMsgSvr.Delegate(ctx, delegateMsg)
+	require.NoError(t, err)
+
+	err = govKeeper.AddVote(ctx, proposalID, voter, v1.NewNonSplitVoteOption(v1.OptionYes), metadata)
+	require.NoError(t, err)
 }
 
 // With expedited proposal's minimum deposit set higher than the default deposit, we must

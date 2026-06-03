@@ -1,6 +1,7 @@
 package keeper_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -28,6 +29,7 @@ import (
 	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	"github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 var (
@@ -52,6 +54,18 @@ func getTestProposal() []sdk.Msg {
 
 // setupGovKeeper creates a govKeeper as well as all its dependencies.
 func setupGovKeeper(t *testing.T) (
+	*keeper.Keeper,
+	*govtestutil.MockAccountKeeper,
+	*govtestutil.MockBankKeeper,
+	*govtestutil.MockStakingKeeper,
+	*govtestutil.MockDistributionKeeper,
+	moduletestutil.TestEncodingConfig,
+	sdk.Context,
+) {
+	return setupGovKeeperWithStakingState(t, nil, nil)
+}
+
+func setupGovKeeperWithStakingState(t *testing.T, validators []stakingtypes.ValidatorI, delegations map[string][]stakingtypes.DelegationI) (
 	*keeper.Keeper,
 	*govtestutil.MockAccountKeeper,
 	*govtestutil.MockBankKeeper,
@@ -93,8 +107,23 @@ func setupGovKeeper(t *testing.T) (
 	}).AnyTimes()
 
 	stakingKeeper.EXPECT().BondDenom(ctx).Return("stake", nil).AnyTimes()
-	stakingKeeper.EXPECT().IterateBondedValidatorsByPower(gomock.Any(), gomock.Any()).AnyTimes()
-	stakingKeeper.EXPECT().IterateDelegations(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	stakingKeeper.EXPECT().ValidatorAddressCodec().Return(address.NewBech32Codec("cosmosvaloper")).AnyTimes()
+	stakingKeeper.EXPECT().IterateBondedValidatorsByPower(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(int64, stakingtypes.ValidatorI) bool) error {
+		for i, validator := range validators {
+			if fn(int64(i), validator) {
+				break
+			}
+		}
+		return nil
+	}).AnyTimes()
+	stakingKeeper.EXPECT().IterateDelegations(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, delegator sdk.AccAddress, fn func(int64, stakingtypes.DelegationI) bool) error {
+		for i, delegation := range delegations[delegator.String()] {
+			if fn(int64(i), delegation) {
+				break
+			}
+		}
+		return nil
+	}).AnyTimes()
 	stakingKeeper.EXPECT().TotalBondedTokens(gomock.Any()).Return(math.NewInt(10000000), nil).AnyTimes()
 	distributionKeeper.EXPECT().FundCommunityPool(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 

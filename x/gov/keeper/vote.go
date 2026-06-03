@@ -14,6 +14,20 @@ import (
 
 // AddVote adds a vote on a specific proposal
 func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voterAddr sdk.AccAddress, options v1.WeightedVoteOptions, metadata string) error {
+	err := k.assertMetadataLength(metadata)
+	if err != nil {
+		return err
+	}
+
+	for _, option := range options {
+		if option == nil {
+			return errors.Wrap(types.ErrInvalidVote, "<nil>")
+		}
+		if !v1.ValidWeightedVoteOption(*option) {
+			return errors.Wrap(types.ErrInvalidVote, option.String())
+		}
+	}
+
 	// Check if proposal is in voting period.
 	inVotingPeriod, err := k.VotingPeriodProposals.Has(ctx, proposalID)
 	if err != nil {
@@ -21,18 +35,36 @@ func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voterAddr sdk.Ac
 	}
 
 	if !inVotingPeriod {
+		proposal, err := k.Proposals.Get(ctx, proposalID)
+		if err != nil {
+			if errors.IsOf(err, collections.ErrNotFound) {
+				return errors.Wrapf(types.ErrInactiveProposal, "%d", proposalID)
+			}
+			return err
+		}
+
+		if proposal.Status == v1.StatusDepositPeriod {
+			isValidator, err := k.isBondedValidator(ctx, voterAddr)
+			if err != nil {
+				return err
+			}
+			if !isValidator {
+				return errors.Wrapf(types.ErrInactiveProposal, "%d", proposalID)
+			}
+
+			_, err = k.AddProposalBacking(ctx, proposalID, voterAddr, options, metadata)
+			return err
+		}
+
 		return errors.Wrapf(types.ErrInactiveProposal, "%d", proposalID)
 	}
 
-	err = k.assertMetadataLength(metadata)
+	isValidator, err := k.isBondedValidator(ctx, voterAddr)
 	if err != nil {
 		return err
 	}
-
-	for _, option := range options {
-		if !v1.ValidWeightedVoteOption(*option) {
-			return errors.Wrap(types.ErrInvalidVote, option.String())
-		}
+	if isValidator {
+		return errors.Wrap(types.ErrInvalidVote, "bonded validators cannot vote during the public voting period")
 	}
 
 	vote := v1.NewVote(proposalID, voterAddr, options, metadata)

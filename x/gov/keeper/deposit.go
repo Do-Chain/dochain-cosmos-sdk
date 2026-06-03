@@ -133,15 +133,10 @@ func (k Keeper) AddDeposit(ctx context.Context, proposalID uint64, depositorAddr
 		return false, err
 	}
 
-	// Check if deposit has provided sufficient total funds to transition the proposal into the voting period
-	activatedVotingPeriod := false
-	if proposal.Status == v1.StatusDepositPeriod && sdk.NewCoins(proposal.TotalDeposit...).IsAllGTE(minDepositAmount) {
-		err = k.ActivateVotingPeriod(ctx, proposal)
-		if err != nil {
-			return false, err
-		}
-
-		activatedVotingPeriod = true
+	// Check whether phase-one validator backing and deposit requirements are both satisfied.
+	activatedVotingPeriod, err := k.TryActivateVotingPeriod(ctx, proposal)
+	if err != nil {
+		return false, err
 	}
 
 	// Add or update deposit object

@@ -235,6 +235,10 @@ func (k Keeper) DeleteProposal(ctx context.Context, proposalID uint64) error {
 		}
 	}
 
+	if err := k.deleteProposalBackers(ctx, proposalID); err != nil {
+		return err
+	}
+
 	return k.Proposals.Remove(ctx, proposalID)
 }
 
@@ -264,6 +268,10 @@ func (k Keeper) ActivateVotingPeriod(ctx context.Context, proposal v1.Proposal) 
 
 	err = k.InactiveProposalsQueue.Remove(ctx, collections.Join(*proposal.DepositEndTime, proposal.Id))
 	if err != nil {
+		return err
+	}
+
+	if err := k.deleteProposalBackers(ctx, proposal.Id); err != nil {
 		return err
 	}
 
