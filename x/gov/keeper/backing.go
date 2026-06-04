@@ -119,11 +119,8 @@ func (k Keeper) proposalBackingThresholdMet(ctx context.Context, proposalID uint
 		return false, err
 	}
 
-	// Empty validator sets are not expected on live chains. Treating them as
-	// satisfied keeps isolated keeper tests and genesis-only contexts from
-	// deadlocking before a validator set exists.
 	if bondedValidatorCount == 0 {
-		return true, nil
+		return false, nil
 	}
 
 	return backingCount*proposalBackingThresholdDenominator >= bondedValidatorCount*proposalBackingThresholdNumerator, nil

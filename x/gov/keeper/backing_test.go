@@ -50,6 +50,25 @@ func TestPhaseOneValidatorBackingThreshold(t *testing.T) {
 	require.NoError(t, govKeeper.AddVote(ctx, proposal.Id, proposer, v1.NewNonSplitVoteOption(v1.OptionYes), ""))
 }
 
+func TestPhaseOneDoesNotActivateWithoutBondedValidators(t *testing.T) {
+	govKeeper, _, bankKeeper, stakingKeeper, _, _, ctx := setupGovKeeperWithStakingState(t, nil, nil)
+
+	proposer := simtestutil.AddTestAddrs(bankKeeper, stakingKeeper, ctx, 1, math.NewInt(30000000))[0]
+	proposal, err := govKeeper.SubmitProposal(ctx, TestProposal, "", "phase one", "summary", proposer, false)
+	require.NoError(t, err)
+
+	params, err := govKeeper.Params.Get(ctx)
+	require.NoError(t, err)
+
+	activated, err := govKeeper.AddDeposit(ctx, proposal.Id, proposer, sdk.NewCoins(params.MinDeposit...))
+	require.NoError(t, err)
+	require.False(t, activated)
+
+	proposal, err = govKeeper.Proposals.Get(ctx, proposal.Id)
+	require.NoError(t, err)
+	require.Equal(t, v1.StatusDepositPeriod, proposal.Status)
+}
+
 func TestPhaseOneRejectsNonValidatorBacking(t *testing.T) {
 	validatorAddrs := simtestutil.CreateIncrementalAccounts(1)
 	validators, delegations := newBondedValidatorState(t, validatorAddrs, true)
