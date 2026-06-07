@@ -30,49 +30,46 @@ func TestVotes(t *testing.T) {
 	require.Error(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), metadata), "proposal not on voting period")
 	require.Error(t, govKeeper.AddVote(ctx, 10, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), ""), "invalid proposal ID")
 
-	proposal.Status = v1.StatusVotingPeriod
-	require.NoError(t, govKeeper.SetProposal(ctx, proposal))
+	require.NoError(t, govKeeper.ActivateVotingPeriod(ctx, proposal))
 
 	require.Error(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(invalidOption), ""), "invalid option")
 
 	// Test first vote
-	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionAbstain), metadata))
+	require.ErrorContains(t,
+		govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionAbstain), metadata),
+		"DoChain governance only accepts a single YES or NO vote",
+	)
+	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), metadata))
 	vote, err := govKeeper.Votes.Get(ctx, collections.Join(proposalID, addrs[0]))
 	require.Nil(t, err)
 	require.Equal(t, addrs[0].String(), vote.Voter)
 	require.Equal(t, proposalID, vote.ProposalId)
 	require.True(t, len(vote.Options) == 1)
-	require.Equal(t, v1.OptionAbstain, vote.Options[0].Option)
+	require.Equal(t, v1.OptionYes, vote.Options[0].Option)
 
 	// Test change of vote
-	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), ""))
+	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionNo), ""))
 	vote, err = govKeeper.Votes.Get(ctx, collections.Join(proposalID, addrs[0]))
 	require.Nil(t, err)
 	require.Equal(t, addrs[0].String(), vote.Voter)
 	require.Equal(t, proposalID, vote.ProposalId)
 	require.True(t, len(vote.Options) == 1)
-	require.Equal(t, v1.OptionYes, vote.Options[0].Option)
+	require.Equal(t, v1.OptionNo, vote.Options[0].Option)
 
 	// Test second vote
-	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[1], v1.WeightedVoteOptions{
+	require.ErrorContains(t, govKeeper.AddVote(ctx, proposalID, addrs[1], v1.WeightedVoteOptions{
 		v1.NewWeightedVoteOption(v1.OptionYes, sdkmath.LegacyNewDecWithPrec(60, 2)),
 		v1.NewWeightedVoteOption(v1.OptionNo, sdkmath.LegacyNewDecWithPrec(30, 2)),
 		v1.NewWeightedVoteOption(v1.OptionAbstain, sdkmath.LegacyNewDecWithPrec(5, 2)),
 		v1.NewWeightedVoteOption(v1.OptionNoWithVeto, sdkmath.LegacyNewDecWithPrec(5, 2)),
-	}, ""))
+	}, ""), "DoChain governance only accepts a single YES or NO vote")
+	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[1], v1.NewNonSplitVoteOption(v1.OptionYes), ""))
 	vote, err = govKeeper.Votes.Get(ctx, collections.Join(proposalID, addrs[1]))
 	require.Nil(t, err)
 	require.Equal(t, addrs[1].String(), vote.Voter)
 	require.Equal(t, proposalID, vote.ProposalId)
-	require.True(t, len(vote.Options) == 4)
+	require.True(t, len(vote.Options) == 1)
 	require.Equal(t, v1.OptionYes, vote.Options[0].Option)
-	require.Equal(t, v1.OptionNo, vote.Options[1].Option)
-	require.Equal(t, v1.OptionAbstain, vote.Options[2].Option)
-	require.Equal(t, v1.OptionNoWithVeto, vote.Options[3].Option)
-	require.Equal(t, vote.Options[0].Weight, sdkmath.LegacyNewDecWithPrec(60, 2).String())
-	require.Equal(t, vote.Options[1].Weight, sdkmath.LegacyNewDecWithPrec(30, 2).String())
-	require.Equal(t, vote.Options[2].Weight, sdkmath.LegacyNewDecWithPrec(5, 2).String())
-	require.Equal(t, vote.Options[3].Weight, sdkmath.LegacyNewDecWithPrec(5, 2).String())
 
 	// Test vote iterator
 	// NOTE order of deposits is determined by the addresses
@@ -91,14 +88,11 @@ func TestVotes(t *testing.T) {
 	require.Equal(t, addrs[0].String(), votes[0].Voter)
 	require.Equal(t, proposalID, votes[0].ProposalId)
 	require.True(t, len(votes[0].Options) == 1)
-	require.Equal(t, v1.OptionYes, votes[0].Options[0].Option)
+	require.Equal(t, v1.OptionNo, votes[0].Options[0].Option)
 	require.Equal(t, addrs[1].String(), votes[1].Voter)
 	require.Equal(t, proposalID, votes[1].ProposalId)
-	require.True(t, len(votes[1].Options) == 4)
-	require.Equal(t, votes[1].Options[0].Weight, sdkmath.LegacyNewDecWithPrec(60, 2).String())
-	require.Equal(t, votes[1].Options[1].Weight, sdkmath.LegacyNewDecWithPrec(30, 2).String())
-	require.Equal(t, votes[1].Options[2].Weight, sdkmath.LegacyNewDecWithPrec(5, 2).String())
-	require.Equal(t, votes[1].Options[3].Weight, sdkmath.LegacyNewDecWithPrec(5, 2).String())
+	require.True(t, len(votes[1].Options) == 1)
+	require.Equal(t, v1.OptionYes, votes[1].Options[0].Option)
 
 	// non existent vote
 	_, err = govKeeper.Votes.Get(ctx, collections.Join(proposalID+100, addrs[1]))

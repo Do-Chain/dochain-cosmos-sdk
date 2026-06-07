@@ -23,6 +23,8 @@ type CalculateVoteResultsAndVotingPowerFn func(
 	validators map[string]v1.ValidatorGovInfo,
 ) (totalVoterPower math.LegacyDec, results map[v1.VoteOption]math.LegacyDec, err error)
 
+var publicVotePowerCapRatio = math.LegacyNewDecWithPrec(25, 3)
+
 func defaultCalculateVoteResultsAndVotingPower(
 	ctx context.Context,
 	k Keeper,
@@ -30,6 +32,11 @@ func defaultCalculateVoteResultsAndVotingPower(
 	validators map[string]v1.ValidatorGovInfo,
 ) (totalVoterPower math.LegacyDec, results map[v1.VoteOption]math.LegacyDec, err error) {
 	totalVotingPower := math.LegacyZeroDec()
+	totalBonded, err := k.sk.TotalBondedTokens(ctx)
+	if err != nil {
+		return math.LegacyZeroDec(), nil, err
+	}
+	voterPowerCap := math.LegacyNewDecFromInt(totalBonded).Mul(publicVotePowerCapRatio)
 
 	results = make(map[v1.VoteOption]math.LegacyDec)
 	results[v1.OptionYes] = math.LegacyZeroDec()
@@ -55,6 +62,8 @@ func defaultCalculateVoteResultsAndVotingPower(
 			validators[valAddrStr] = val
 		}
 
+		votingPower := math.LegacyZeroDec()
+
 		// iterate over all delegations from voter, deduct from any delegated-to validators
 		err = k.sk.IterateDelegations(ctx, voter, func(index int64, delegation stakingtypes.DelegationI) (stop bool) {
 			valAddrStr := delegation.GetValidatorAddr()
@@ -66,14 +75,8 @@ func defaultCalculateVoteResultsAndVotingPower(
 				validators[valAddrStr] = val
 
 				// delegation shares * bonded / total shares
-				votingPower := delegation.GetShares().MulInt(val.BondedTokens).Quo(val.DelegatorShares)
-
-				for _, option := range vote.Options {
-					weight, _ := math.LegacyNewDecFromStr(option.Weight)
-					subPower := votingPower.Mul(weight)
-					results[option.Option] = results[option.Option].Add(subPower)
-				}
-				totalVotingPower = totalVotingPower.Add(votingPower)
+				delegationVotingPower := delegation.GetShares().MulInt(val.BondedTokens).Quo(val.DelegatorShares)
+				votingPower = votingPower.Add(delegationVotingPower)
 			}
 
 			return false
@@ -81,6 +84,17 @@ func defaultCalculateVoteResultsAndVotingPower(
 		if err != nil {
 			return false, err
 		}
+
+		if votingPower.GT(voterPowerCap) {
+			votingPower = voterPowerCap
+		}
+
+		for _, option := range vote.Options {
+			weight, _ := math.LegacyNewDecFromStr(option.Weight)
+			subPower := votingPower.Mul(weight)
+			results[option.Option] = results[option.Option].Add(subPower)
+		}
+		totalVotingPower = totalVotingPower.Add(votingPower)
 
 		votesToRemove = append(votesToRemove, key)
 		return false, nil

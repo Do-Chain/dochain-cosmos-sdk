@@ -15,12 +15,13 @@ import (
 )
 
 const (
-	proposalBackingThresholdNumerator   uint64 = 30
+	proposalBackingThresholdNumerator   uint64 = 33
 	proposalBackingThresholdDenominator uint64 = 100
 )
 
-// AddProposalBacking records phase-one backing for a proposal. During this
-// phase, each bonded self-delegated validator counts once regardless of stake.
+// AddProposalBacking records the validator-stage vote for a proposal. During
+// this phase, each bonded self-delegated validator counts once regardless of
+// stake, and 33% YES support moves the proposal to the public voting period.
 func (k Keeper) AddProposalBacking(ctx context.Context, proposalID uint64, backer sdk.AccAddress, options v1.WeightedVoteOptions, metadata string) (bool, error) {
 	proposal, err := k.Proposals.Get(ctx, proposalID)
 	if err != nil {
@@ -35,8 +36,9 @@ func (k Keeper) AddProposalBacking(ctx context.Context, proposalID uint64, backe
 		return false, err
 	}
 
-	if !isSingleYesVote(options) {
-		return false, errors.Wrap(types.ErrInvalidVote, "phase-one backing only accepts a single YES vote")
+	option, ok := singleYesNoVoteOption(options)
+	if !ok {
+		return false, errors.Wrap(types.ErrInvalidVote, "validator-stage voting only accepts a single YES or NO vote")
 	}
 
 	isValidator, selfDelegated, err := k.isBondedValidatorSelfDelegated(ctx, backer)
@@ -50,7 +52,7 @@ func (k Keeper) AddProposalBacking(ctx context.Context, proposalID uint64, backe
 		return false, errors.Wrap(types.ErrInvalidVote, "phase-one backing requires validator self-delegation")
 	}
 
-	if err := k.ProposalBackers.Set(ctx, collections.Join(proposalID, backer), []byte{1}); err != nil {
+	if err := k.ProposalBackers.Set(ctx, collections.Join(proposalID, backer), []byte{byte(option)}); err != nil {
 		return false, err
 	}
 
@@ -64,6 +66,7 @@ func (k Keeper) AddProposalBacking(ctx context.Context, proposalID uint64, backe
 		sdk.NewEvent(
 			types.EventTypeProposalBacking,
 			sdk.NewAttribute(types.AttributeKeyBacker, backer.String()),
+			sdk.NewAttribute(types.AttributeKeyOption, option.String()),
 			sdk.NewAttribute(types.AttributeKeyProposalID, fmt.Sprintf("%d", proposalID)),
 			sdk.NewAttribute(types.AttributeKeyBackingCount, fmt.Sprintf("%d", backingCount)),
 			sdk.NewAttribute(types.AttributeKeyBondedValidatorCount, fmt.Sprintf("%d", bondedValidatorCount)),
@@ -74,7 +77,7 @@ func (k Keeper) AddProposalBacking(ctx context.Context, proposalID uint64, backe
 }
 
 // TryActivateVotingPeriod starts phase two once the proposal has both its
-// required deposit and 30% backing from bonded validators.
+// required deposit and 33% YES support from bonded validators.
 func (k Keeper) TryActivateVotingPeriod(ctx context.Context, proposal v1.Proposal) (bool, error) {
 	if proposal.Status != v1.StatusDepositPeriod {
 		return false, nil
@@ -128,8 +131,10 @@ func (k Keeper) proposalBackingThresholdMet(ctx context.Context, proposalID uint
 
 func (k Keeper) proposalBackingCounts(ctx context.Context, proposalID uint64) (backingCount, bondedValidatorCount uint64, err error) {
 	rng := collections.NewPrefixedPairRange[uint64, sdk.AccAddress](proposalID)
-	err = k.ProposalBackers.Walk(ctx, rng, func(_ collections.Pair[uint64, sdk.AccAddress], _ []byte) (bool, error) {
-		backingCount++
+	err = k.ProposalBackers.Walk(ctx, rng, func(_ collections.Pair[uint64, sdk.AccAddress], option []byte) (bool, error) {
+		if len(option) == 1 && v1.VoteOption(option[0]) == v1.OptionYes {
+			backingCount++
+		}
 		return false, nil
 	})
 	if err != nil {
@@ -209,15 +214,19 @@ func (k Keeper) deleteProposalBackers(ctx context.Context, proposalID uint64) er
 	return k.ProposalBackers.Clear(ctx, rng)
 }
 
-func isSingleYesVote(options v1.WeightedVoteOptions) bool {
-	if len(options) != 1 || options[0] == nil || options[0].Option != v1.OptionYes {
-		return false
+func singleYesNoVoteOption(options v1.WeightedVoteOptions) (v1.VoteOption, bool) {
+	if len(options) != 1 || options[0] == nil {
+		return v1.OptionEmpty, false
+	}
+
+	if options[0].Option != v1.OptionYes && options[0].Option != v1.OptionNo {
+		return v1.OptionEmpty, false
 	}
 
 	weight, err := math.LegacyNewDecFromStr(options[0].Weight)
 	if err != nil {
-		return false
+		return v1.OptionEmpty, false
 	}
 
-	return weight.Equal(math.LegacyOneDec())
+	return options[0].Option, weight.Equal(math.LegacyOneDec())
 }

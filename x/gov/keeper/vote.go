@@ -27,6 +27,9 @@ func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voterAddr sdk.Ac
 			return errors.Wrap(types.ErrInvalidVote, option.String())
 		}
 	}
+	if _, ok := singleYesNoVoteOption(options); !ok {
+		return errors.Wrap(types.ErrInvalidVote, "DoChain governance only accepts a single YES or NO vote")
+	}
 
 	// Check if proposal is in voting period.
 	inVotingPeriod, err := k.VotingPeriodProposals.Has(ctx, proposalID)
@@ -49,7 +52,7 @@ func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voterAddr sdk.Ac
 				return err
 			}
 			if !isValidator {
-				return errors.Wrapf(types.ErrInactiveProposal, "%d", proposalID)
+				return errors.Wrap(types.ErrInvalidVote, "validator-stage voting requires a bonded validator operator wallet")
 			}
 
 			_, err = k.AddProposalBacking(ctx, proposalID, voterAddr, options, metadata)

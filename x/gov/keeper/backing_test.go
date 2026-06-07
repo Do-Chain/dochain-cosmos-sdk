@@ -80,7 +80,7 @@ func TestPhaseOneRejectsNonValidatorBacking(t *testing.T) {
 
 	require.ErrorContains(t,
 		govKeeper.AddVote(ctx, proposal.Id, proposer, v1.NewNonSplitVoteOption(v1.OptionYes), ""),
-		"inactive proposal",
+		"validator-stage voting requires a bonded validator operator wallet",
 	)
 }
 
@@ -99,7 +99,7 @@ func TestPhaseOneRequiresValidatorSelfDelegation(t *testing.T) {
 	)
 }
 
-func TestPhaseOneBackingOnlyAcceptsYes(t *testing.T) {
+func TestPhaseOneBackingOnlyAcceptsYesOrNo(t *testing.T) {
 	validatorAddrs := simtestutil.CreateIncrementalAccounts(1)
 	validators, delegations := newBondedValidatorState(t, validatorAddrs, true)
 	govKeeper, _, bankKeeper, stakingKeeper, _, _, ctx := setupGovKeeperWithStakingState(t, validators, delegations)
@@ -108,9 +108,14 @@ func TestPhaseOneBackingOnlyAcceptsYes(t *testing.T) {
 	proposal, err := govKeeper.SubmitProposal(ctx, TestProposal, "", "phase one", "summary", proposer, false)
 	require.NoError(t, err)
 
+	require.NoError(t, govKeeper.AddVote(ctx, proposal.Id, validatorAddrs[0], v1.NewNonSplitVoteOption(v1.OptionNo), ""))
+	proposal, err = govKeeper.Proposals.Get(ctx, proposal.Id)
+	require.NoError(t, err)
+	require.Equal(t, v1.StatusDepositPeriod, proposal.Status)
+
 	require.ErrorContains(t,
-		govKeeper.AddVote(ctx, proposal.Id, validatorAddrs[0], v1.NewNonSplitVoteOption(v1.OptionNo), ""),
-		"phase-one backing only accepts a single YES vote",
+		govKeeper.AddVote(ctx, proposal.Id, validatorAddrs[0], v1.NewNonSplitVoteOption(v1.OptionAbstain), ""),
+		"DoChain governance only accepts a single YES or NO vote",
 	)
 }
 

@@ -33,7 +33,7 @@ func TestVoteRemovalAfterTally(t *testing.T) {
 	// Add votes from different addresses
 	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[0], v1.NewNonSplitVoteOption(v1.OptionYes), ""))
 	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[1], v1.NewNonSplitVoteOption(v1.OptionNo), ""))
-	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[2], v1.NewNonSplitVoteOption(v1.OptionAbstain), ""))
+	require.NoError(t, govKeeper.AddVote(ctx, proposalID, addrs[2], v1.NewNonSplitVoteOption(v1.OptionYes), ""))
 
 	// verify votes were added to state
 	for i, addr := range addrs {
