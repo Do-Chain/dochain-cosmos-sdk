@@ -62,10 +62,22 @@ func setupGovKeeper(t *testing.T) (
 	moduletestutil.TestEncodingConfig,
 	sdk.Context,
 ) {
-	return setupGovKeeperWithStakingState(t, nil, nil)
+	return setupGovKeeperWithStakingStateAndOptions(t, nil, nil)
 }
 
 func setupGovKeeperWithStakingState(t *testing.T, validators []stakingtypes.ValidatorI, delegations map[string][]stakingtypes.DelegationI) (
+	*keeper.Keeper,
+	*govtestutil.MockAccountKeeper,
+	*govtestutil.MockBankKeeper,
+	*govtestutil.MockStakingKeeper,
+	*govtestutil.MockDistributionKeeper,
+	moduletestutil.TestEncodingConfig,
+	sdk.Context,
+) {
+	return setupGovKeeperWithStakingStateAndOptions(t, validators, delegations)
+}
+
+func setupGovKeeperWithStakingStateAndOptions(t *testing.T, validators []stakingtypes.ValidatorI, delegations map[string][]stakingtypes.DelegationI, opts ...keeper.InitOption) (
 	*keeper.Keeper,
 	*govtestutil.MockAccountKeeper,
 	*govtestutil.MockBankKeeper,
@@ -129,7 +141,7 @@ func setupGovKeeperWithStakingState(t *testing.T, validators []stakingtypes.Vali
 
 	// Gov keeper initializations
 
-	govKeeper := keeper.NewKeeper(encCfg.Codec, storeService, acctKeeper, bankKeeper, stakingKeeper, distributionKeeper, msr, types.DefaultConfig(), govAcct.String())
+	govKeeper := keeper.NewKeeper(encCfg.Codec, storeService, acctKeeper, bankKeeper, stakingKeeper, distributionKeeper, msr, types.DefaultConfig(), govAcct.String(), opts...)
 	require.NoError(t, govKeeper.ProposalID.Set(ctx, 1))
 	govRouter := v1beta1.NewRouter() // Also register legacy gov handlers to test them too.
 	govRouter.AddRoute(types.RouterKey, v1beta1.ProposalHandler)

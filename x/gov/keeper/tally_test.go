@@ -1,6 +1,7 @@
 package keeper_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
+	"github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 )
 
@@ -111,5 +113,129 @@ func TestMultipleProposalsVoteRemoval(t *testing.T) {
 		// proposal2 votes should still exist.
 		_, err = govKeeper.Votes.Get(ctx, collections.Join(proposal2ID, addr))
 		require.NoError(t, err)
+	}
+}
+
+func TestDoChainTallySemantics(t *testing.T) {
+	tests := []struct {
+		name            string
+		totalVoterPower math.LegacyDec
+		results         map[v1.VoteOption]math.LegacyDec
+		expedited       bool
+		expectedPasses  bool
+		expectedBurns   bool
+		expectedYes     string
+		expectedAbstain string
+		expectedNo      string
+		expectedNoVeto  string
+	}{
+		{
+			name:            "abstain is excluded from pass fail denominator",
+			totalVoterPower: math.LegacyNewDec(100),
+			results: map[v1.VoteOption]math.LegacyDec{
+				v1.OptionYes:        math.LegacyNewDec(40),
+				v1.OptionAbstain:    math.LegacyNewDec(50),
+				v1.OptionNo:         math.LegacyNewDec(10),
+				v1.OptionNoWithVeto: math.LegacyZeroDec(),
+			},
+			expectedPasses:  true,
+			expectedYes:     "40",
+			expectedAbstain: "50",
+			expectedNo:      "10",
+			expectedNoVeto:  "0",
+		},
+		{
+			name:            "no with veto cannot fail or burn a passing proposal",
+			totalVoterPower: math.LegacyNewDec(100),
+			results: map[v1.VoteOption]math.LegacyDec{
+				v1.OptionYes:        math.LegacyNewDec(60),
+				v1.OptionAbstain:    math.LegacyZeroDec(),
+				v1.OptionNo:         math.LegacyZeroDec(),
+				v1.OptionNoWithVeto: math.LegacyNewDec(40),
+			},
+			expectedPasses:  true,
+			expectedBurns:   false,
+			expectedYes:     "60",
+			expectedAbstain: "0",
+			expectedNo:      "0",
+			expectedNoVeto:  "40",
+		},
+		{
+			name:            "quorum is disabled",
+			totalVoterPower: math.LegacyOneDec(),
+			results: map[v1.VoteOption]math.LegacyDec{
+				v1.OptionYes:        math.LegacyOneDec(),
+				v1.OptionAbstain:    math.LegacyZeroDec(),
+				v1.OptionNo:         math.LegacyZeroDec(),
+				v1.OptionNoWithVeto: math.LegacyZeroDec(),
+			},
+			expectedPasses:  true,
+			expectedYes:     "1",
+			expectedAbstain: "0",
+			expectedNo:      "0",
+			expectedNoVeto:  "0",
+		},
+		{
+			name:            "yes equal to threshold fails",
+			totalVoterPower: math.LegacyNewDec(100),
+			results: map[v1.VoteOption]math.LegacyDec{
+				v1.OptionYes:        math.LegacyNewDec(50),
+				v1.OptionAbstain:    math.LegacyZeroDec(),
+				v1.OptionNo:         math.LegacyNewDec(50),
+				v1.OptionNoWithVeto: math.LegacyZeroDec(),
+			},
+			expectedPasses:  false,
+			expectedYes:     "50",
+			expectedAbstain: "0",
+			expectedNo:      "50",
+			expectedNoVeto:  "0",
+		},
+		{
+			name:            "all abstain fails",
+			totalVoterPower: math.LegacyNewDec(100),
+			results: map[v1.VoteOption]math.LegacyDec{
+				v1.OptionYes:        math.LegacyZeroDec(),
+				v1.OptionAbstain:    math.LegacyNewDec(100),
+				v1.OptionNo:         math.LegacyZeroDec(),
+				v1.OptionNoWithVeto: math.LegacyZeroDec(),
+			},
+			expectedPasses:  false,
+			expectedYes:     "0",
+			expectedAbstain: "100",
+			expectedNo:      "0",
+			expectedNoVeto:  "0",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tallyFn := func(
+				context.Context,
+				keeper.Keeper,
+				v1.Proposal,
+				map[string]v1.ValidatorGovInfo,
+			) (math.LegacyDec, map[v1.VoteOption]math.LegacyDec, error) {
+				return tc.totalVoterPower, tc.results, nil
+			}
+
+			govKeeper, _, _, _, _, _, ctx := setupGovKeeperWithStakingStateAndOptions(
+				t,
+				nil,
+				nil,
+				keeper.WithCustomCalculateVoteResultsAndVotingPowerFn(tallyFn),
+			)
+
+			passes, burnDeposits, tallyResults, err := govKeeper.Tally(ctx, v1.Proposal{
+				Id:        1,
+				Expedited: tc.expedited,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedPasses, passes)
+			require.Equal(t, tc.expectedBurns, burnDeposits)
+			require.Equal(t, tc.expectedYes, tallyResults.YesCount)
+			require.Equal(t, tc.expectedAbstain, tallyResults.AbstainCount)
+			require.Equal(t, tc.expectedNo, tallyResults.NoCount)
+			require.Equal(t, tc.expectedNoVeto, tallyResults.NoWithVetoCount)
+		})
 	}
 }
