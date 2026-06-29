@@ -10,7 +10,9 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 func TestVoteRemovalAfterTally(t *testing.T) {
@@ -112,4 +114,70 @@ func TestMultipleProposalsVoteRemoval(t *testing.T) {
 		_, err = govKeeper.Votes.Get(ctx, collections.Join(proposal2ID, addr))
 		require.NoError(t, err)
 	}
+}
+
+func TestCommunityTallyCapsEachWalletAtTwoPointFivePercent(t *testing.T) {
+	addrs := simtestutil.CreateIncrementalAccounts(3)
+	validatorAcc := addrs[0]
+	valAddr := sdk.ValAddress(validatorAcc)
+	validator, err := stakingtypes.NewValidator(valAddr.String(), simtestutil.CreateTestPubKeys(1)[0], stakingtypes.Description{})
+	require.NoError(t, err)
+	validator.Status = stakingtypes.Bonded
+	validator.Tokens = math.NewInt(10_000_000)
+	validator.DelegatorShares = math.LegacyNewDec(10_000_000)
+
+	voters := addrs[1:]
+	delegations := map[string][]stakingtypes.DelegationI{
+		voters[0].String(): {
+			stakingtypes.NewDelegation(voters[0].String(), valAddr.String(), math.LegacyNewDec(1_000_000)),
+		},
+		voters[1].String(): {
+			stakingtypes.NewDelegation(voters[1].String(), valAddr.String(), math.LegacyNewDec(100_000)),
+		},
+	}
+	govKeeper, _, bankKeeper, stakingKeeper, _, _, ctx := setupGovKeeperWithStakingState(t, []stakingtypes.ValidatorI{validator}, delegations)
+
+	proposer := simtestutil.AddTestAddrs(bankKeeper, stakingKeeper, ctx, 1, math.NewInt(30_000_000))[0]
+	proposal, err := govKeeper.SubmitProposal(ctx, TestProposal, "", "cap", "summary", proposer, false)
+	require.NoError(t, err)
+
+	proposal.Status = v1.StatusVotingPeriod
+	require.NoError(t, govKeeper.SetProposal(ctx, proposal))
+	require.NoError(t, govKeeper.AddVote(ctx, proposal.Id, voters[0], v1.NewNonSplitVoteOption(v1.OptionYes), ""))
+	require.NoError(t, govKeeper.AddVote(ctx, proposal.Id, voters[1], v1.NewNonSplitVoteOption(v1.OptionNo), ""))
+
+	_, _, tally, err := govKeeper.Tally(ctx, proposal)
+	require.NoError(t, err)
+	require.Equal(t, "250000", tally.YesCount)
+	require.Equal(t, "100000", tally.NoCount)
+}
+
+func TestCommunityTallyIgnoresValidatorOperatorVotes(t *testing.T) {
+	validatorAcc := simtestutil.CreateIncrementalAccounts(1)[0]
+	valAddr := sdk.ValAddress(validatorAcc)
+	validator, err := stakingtypes.NewValidator(valAddr.String(), simtestutil.CreateTestPubKeys(1)[0], stakingtypes.Description{})
+	require.NoError(t, err)
+	validator.Status = stakingtypes.Bonded
+	validator.Tokens = math.NewInt(10_000_000)
+	validator.DelegatorShares = math.LegacyNewDec(10_000_000)
+
+	delegations := map[string][]stakingtypes.DelegationI{
+		validatorAcc.String(): {
+			stakingtypes.NewDelegation(validatorAcc.String(), valAddr.String(), math.LegacyNewDec(10_000_000)),
+		},
+	}
+	govKeeper, _, bankKeeper, stakingKeeper, _, _, ctx := setupGovKeeperWithStakingState(t, []stakingtypes.ValidatorI{validator}, delegations)
+
+	proposer := simtestutil.AddTestAddrs(bankKeeper, stakingKeeper, ctx, 1, math.NewInt(30_000_000))[0]
+	proposal, err := govKeeper.SubmitProposal(ctx, TestProposal, "", "validator", "summary", proposer, false)
+	require.NoError(t, err)
+
+	proposal.Status = v1.StatusVotingPeriod
+	require.NoError(t, govKeeper.SetProposal(ctx, proposal))
+	require.NoError(t, govKeeper.Votes.Set(ctx, collections.Join(proposal.Id, validatorAcc), v1.NewVote(proposal.Id, validatorAcc, v1.NewNonSplitVoteOption(v1.OptionYes), "")))
+
+	_, _, tally, err := govKeeper.Tally(ctx, proposal)
+	require.NoError(t, err)
+	require.Equal(t, "0", tally.YesCount)
+	require.Equal(t, "0", tally.NoCount)
 }

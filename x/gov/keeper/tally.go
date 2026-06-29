@@ -12,6 +12,11 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
+const (
+	voterPowerCapNumerator   int64 = 25
+	voterPowerCapDenominator int64 = 1000
+)
+
 // CalculateVoteResultsAndVotingPowerFn is a function signature for calculating vote results and voting power
 // It can be overridden to customize the voting power calculation for proposals
 // It gets the proposal tallied and the validators governance infos (bonded tokens, voting power, etc.)
@@ -37,10 +42,17 @@ func defaultCalculateVoteResultsAndVotingPower(
 	results[v1.OptionNo] = math.LegacyZeroDec()
 	results[v1.OptionNoWithVeto] = math.LegacyZeroDec()
 
+	totalBonded, err := k.sk.TotalBondedTokens(ctx)
+	if err != nil {
+		return math.LegacyZeroDec(), nil, err
+	}
+	voterPowerCap := math.LegacyNewDecFromInt(totalBonded).
+		MulInt64(voterPowerCapNumerator).
+		QuoInt64(voterPowerCapDenominator)
+
 	rng := collections.NewPrefixedPairRange[uint64, sdk.AccAddress](proposal.Id)
 	votesToRemove := []collections.Pair[uint64, sdk.AccAddress]{}
 	err = k.Votes.Walk(ctx, rng, func(key collections.Pair[uint64, sdk.AccAddress], vote v1.Vote) (bool, error) {
-		// if validator, just record it in the map
 		voter, err := k.authKeeper.AddressCodec().StringToBytes(vote.Voter)
 		if err != nil {
 			return false, err
@@ -50,30 +62,22 @@ func defaultCalculateVoteResultsAndVotingPower(
 		if err != nil {
 			return false, err
 		}
-		if val, ok := validators[valAddrStr]; ok {
-			val.Vote = vote.Options
-			validators[valAddrStr] = val
+
+		// DoChain Community voting excludes validator operators. Validators
+		// only participate in phase-one backing, where each validator counts once.
+		if _, ok := validators[valAddrStr]; ok {
+			votesToRemove = append(votesToRemove, key)
+			return false, nil
 		}
 
-		// iterate over all delegations from voter, deduct from any delegated-to validators
+		voterVotingPower := math.LegacyZeroDec()
 		err = k.sk.IterateDelegations(ctx, voter, func(index int64, delegation stakingtypes.DelegationI) (stop bool) {
 			valAddrStr := delegation.GetValidatorAddr()
 
 			if val, ok := validators[valAddrStr]; ok {
-				// There is no need to handle the special case that validator address equal to voter address.
-				// Because voter's voting power will tally again even if there will be deduction of voter's voting power from validator.
-				val.DelegatorDeductions = val.DelegatorDeductions.Add(delegation.GetShares())
-				validators[valAddrStr] = val
-
 				// delegation shares * bonded / total shares
 				votingPower := delegation.GetShares().MulInt(val.BondedTokens).Quo(val.DelegatorShares)
-
-				for _, option := range vote.Options {
-					weight, _ := math.LegacyNewDecFromStr(option.Weight)
-					subPower := votingPower.Mul(weight)
-					results[option.Option] = results[option.Option].Add(subPower)
-				}
-				totalVotingPower = totalVotingPower.Add(votingPower)
+				voterVotingPower = voterVotingPower.Add(votingPower)
 			}
 
 			return false
@@ -81,6 +85,14 @@ func defaultCalculateVoteResultsAndVotingPower(
 		if err != nil {
 			return false, err
 		}
+
+		votingPower := capVoterPower(voterVotingPower, voterPowerCap)
+		for _, option := range vote.Options {
+			weight, _ := math.LegacyNewDecFromStr(option.Weight)
+			subPower := votingPower.Mul(weight)
+			results[option.Option] = results[option.Option].Add(subPower)
+		}
+		totalVotingPower = totalVotingPower.Add(votingPower)
 
 		votesToRemove = append(votesToRemove, key)
 		return false, nil
@@ -96,24 +108,15 @@ func defaultCalculateVoteResultsAndVotingPower(
 		}
 	}
 
-	// iterate over the validators again to tally their voting power
-	for _, val := range validators {
-		if len(val.Vote) == 0 {
-			continue
-		}
+	return totalVotingPower, results, nil
+}
 
-		sharesAfterDeductions := val.DelegatorShares.Sub(val.DelegatorDeductions)
-		votingPower := sharesAfterDeductions.MulInt(val.BondedTokens).Quo(val.DelegatorShares)
-
-		for _, option := range val.Vote {
-			weight, _ := math.LegacyNewDecFromStr(option.Weight)
-			subPower := votingPower.Mul(weight)
-			results[option.Option] = results[option.Option].Add(subPower)
-		}
-		totalVotingPower = totalVotingPower.Add(votingPower)
+func capVoterPower(votingPower, cap math.LegacyDec) math.LegacyDec {
+	if cap.IsZero() || votingPower.LTE(cap) {
+		return votingPower
 	}
 
-	return totalVotingPower, results, nil
+	return cap
 }
 
 // getCurrentValidators fetches all the bonded validators, insert them into currValidators
