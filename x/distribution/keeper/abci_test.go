@@ -140,8 +140,11 @@ func TestBeginBlockToMultipleValidators(t *testing.T) {
 	ctx := ts.testCtx.Ctx.
 		WithBlockHeader(cmtproto.Header{
 			ProposerAddress: testProposerAddress,
+			ChainID:         disttypes.DoChainMainnetChainID,
+			Height:          disttypes.GasFeeSplitUpgradeHeight,
 			Time:            time.Now(),
-		})
+		}).
+		WithChainID(disttypes.DoChainMainnetChainID)
 
 	// reset fee pool & set params
 	require.NoError(t, ts.distrKeeper.Params.Set(ctx, disttypes.DefaultParams()))
@@ -194,8 +197,10 @@ func TestBeginBlockToMultipleValidators(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(100)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(20)))
 	ts.bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
@@ -211,7 +216,7 @@ func TestBeginBlockToMultipleValidators(t *testing.T) {
 			},
 		},
 	}
-	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(2)
+	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(disttypes.GasFeeSplitUpgradeHeight)
 
 	feePoolBefore, err := ts.distrKeeper.FeePool.Get(ctx)
 	require.NoError(t, err)
@@ -223,39 +228,39 @@ func TestBeginBlockToMultipleValidators(t *testing.T) {
 	require.False(t, feePoolBefore.CommunityPool.Equal(feePoolAfter.CommunityPool), fmt.Sprintf("before: %s, after: %s", feePoolBefore.CommunityPool.String(), feePoolAfter.CommunityPool.String()))
 
 	t.Run("assert rewards and commission distributed", func(t *testing.T) {
-		// 98 outstanding rewards (100 less 2 to community pool) - distributed among the two validators with the same stake weight
+		// 70 outstanding rewards, distributed among the two validators with the same stake weight.
 		val0OutstandingRewards, err := ts.distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val0OutstandingRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val0OutstandingRewards.Rewards)
 
 		val1OutstandingRewards, err := ts.distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr1)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1OutstandingRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1OutstandingRewards.Rewards)
 
-		// 2 community pool coins
+		// 10 community pool coins
 		feePool, err := ts.distrKeeper.FeePool.Get(ctx)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(2)}}, feePool.CommunityPool)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(10)}}, feePool.CommunityPool)
 
-		// 50% commission for first proposer, (0.5 * 98%) * 100 / 2 = 23.25
+		// 50% commission for first validator, 0.5 * 35 = 17.5
 		val0Commission, err := ts.distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0Commission.Commission)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0Commission.Commission)
 
 		// zero commission for second proposer
 		val1Commission, err := ts.distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr1)
 		require.NoError(t, err)
 		require.True(t, val1Commission.Commission.IsZero())
 
-		// just staking.proportional for first proposer less commission = (0.5 * 98%) * 100 / 2 = 24.50
+		// staking-proportional rewards for first validator less commission.
 		val0CurrentRewards, err := ts.distrKeeper.GetValidatorCurrentRewards(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0CurrentRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0CurrentRewards.Rewards)
 
-		// proposer reward + staking.proportional for second proposer = (0.5 * (98%)) * 100 = 49
+		// staking-proportional rewards for second validator.
 		val1CurrentRewards, err := ts.distrKeeper.GetValidatorCurrentRewards(ctx, valAddr1)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1CurrentRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1CurrentRewards.Rewards)
 	})
 
 	// check cons address
@@ -273,8 +278,11 @@ func TestBeginBlockCommunityPoolCollectsDust(t *testing.T) {
 	ctx := ts.testCtx.Ctx.
 		WithBlockHeader(cmtproto.Header{
 			ProposerAddress: testProposerAddress,
+			ChainID:         disttypes.DoChainMainnetChainID,
+			Height:          disttypes.GasFeeSplitUpgradeHeight,
 			Time:            time.Now(),
-		})
+		}).
+		WithChainID(disttypes.DoChainMainnetChainID)
 
 	// reset fee pool
 	require.NoError(t, ts.distrKeeper.FeePool.Set(ctx, disttypes.InitialFeePool()))
@@ -338,9 +346,11 @@ func TestBeginBlockCommunityPoolCollectsDust(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(634195840)))
-	expectedCommunityPool := sdk.NewDecCoins(sdk.NewDecCoinFromDec(sdk.DefaultBondDenom, math.LegacyMustNewDecFromStr("12683916.800000001243023848")))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(126839168)))
+	expectedCommunityPool := sdk.NewDecCoins(sdk.NewDecCoinFromDec(sdk.DefaultBondDenom, math.LegacyMustNewDecFromStr("63419584.000000000887874176")))
 	ts.bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
@@ -362,7 +372,7 @@ func TestBeginBlockCommunityPoolCollectsDust(t *testing.T) {
 			},
 		},
 	}
-	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(2)
+	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(disttypes.GasFeeSplitUpgradeHeight)
 
 	feePoolBefore, err := ts.distrKeeper.FeePool.Get(ctx)
 	require.NoError(t, err)
@@ -434,8 +444,11 @@ func TestBeginBlockToMultipleValidatorsProtocolPool(t *testing.T) {
 	ctx := ts.testCtx.Ctx.
 		WithBlockHeader(cmtproto.Header{
 			ProposerAddress: testProposerAddress,
+			ChainID:         disttypes.DoChainMainnetChainID,
+			Height:          disttypes.GasFeeSplitUpgradeHeight,
 			Time:            time.Now(),
-		})
+		}).
+		WithChainID(disttypes.DoChainMainnetChainID)
 
 	// reset fee pool & set params
 	require.NoError(t, ts.distrKeeper.Params.Set(ctx, disttypes.DefaultParams()))
@@ -488,8 +501,10 @@ func TestBeginBlockToMultipleValidatorsProtocolPool(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(100)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(20)))
 	ts.bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees).AnyTimes()
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
@@ -506,10 +521,10 @@ func TestBeginBlockToMultipleValidatorsProtocolPool(t *testing.T) {
 		},
 	}
 
-	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(1000)
+	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(disttypes.GasFeeSplitUpgradeHeight)
 
-	// we should fully remove everything that was in the community pool (2stake)
-	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, protocolpooltypes.ProtocolPoolEscrowAccount, sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 2))).Return(nil).Times(1)
+	// we should fully remove everything that was in the community pool (10stake)
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, protocolpooltypes.ProtocolPoolEscrowAccount, sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 10))).Return(nil).Times(1)
 
 	feePoolBefore, err := ts.distrKeeper.FeePool.Get(ctx)
 	require.NoError(t, err)
@@ -522,34 +537,34 @@ func TestBeginBlockToMultipleValidatorsProtocolPool(t *testing.T) {
 	require.True(t, feePoolBefore.CommunityPool.Equal(feePoolAfter.CommunityPool), fmt.Sprintf("before: %s, after: %s", feePoolBefore.CommunityPool.String(), feePoolAfter.CommunityPool.String()))
 
 	t.Run("assert rewards and commission distributed", func(t *testing.T) {
-		// 98 outstanding rewards (100 less 2 to community pool)
+		// 70 outstanding rewards, distributed evenly among the two validators.
 		val0OutstandingRewards, err := ts.distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val0OutstandingRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val0OutstandingRewards.Rewards)
 
 		val1OutstandingRewards, err := ts.distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr1)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1OutstandingRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1OutstandingRewards.Rewards)
 
-		// 50% commission for first proposer, (0.5 * 98%) * 100 / 2 = 23.25
+		// 50% commission for first validator, 0.5 * 35 = 17.5
 		val0Commission, err := ts.distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0Commission.Commission)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0Commission.Commission)
 
 		// zero commission for second proposer
 		val1Commission, err := ts.distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr1)
 		require.NoError(t, err)
 		require.True(t, val1Commission.Commission.IsZero())
 
-		// just staking.proportional for first proposer less commission = (0.5 * 98%) * 100 / 2 = 24.50
+		// staking-proportional rewards for first validator less commission.
 		val0CurrentRewards, err := ts.distrKeeper.GetValidatorCurrentRewards(ctx, valAddr0)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0CurrentRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0CurrentRewards.Rewards)
 
-		// proposer reward + staking.proportional for second proposer = (0.5 * (98%)) * 100 = 49
+		// staking-proportional rewards for second validator.
 		val1CurrentRewards, err := ts.distrKeeper.GetValidatorCurrentRewards(ctx, valAddr1)
 		require.NoError(t, err)
-		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1CurrentRewards.Rewards)
+		require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1CurrentRewards.Rewards)
 	})
 
 	// check cons address
@@ -569,8 +584,11 @@ func TestBeginBlockCommunityPoolCollectsDustProtocolPool(t *testing.T) {
 	ctx := ts.testCtx.Ctx.
 		WithBlockHeader(cmtproto.Header{
 			ProposerAddress: testProposerAddress,
+			ChainID:         disttypes.DoChainMainnetChainID,
+			Height:          disttypes.GasFeeSplitUpgradeHeight,
 			Time:            time.Now(),
-		})
+		}).
+		WithChainID(disttypes.DoChainMainnetChainID)
 
 	// reset fee pool
 	require.NoError(t, ts.distrKeeper.FeePool.Set(ctx, disttypes.InitialFeePool()))
@@ -630,8 +648,10 @@ func TestBeginBlockCommunityPoolCollectsDustProtocolPool(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(634195840)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(126839168)))
 	ts.bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
@@ -653,14 +673,14 @@ func TestBeginBlockCommunityPoolCollectsDustProtocolPool(t *testing.T) {
 			},
 		},
 	}
-	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(1000)
+	ctx = ctx.WithVoteInfos(votes).WithBlockHeight(disttypes.GasFeeSplitUpgradeHeight)
 
 	// expect us to send the truncated amount
-	// total amount in pool should be 12683916.800000001243023848 before the
+	// total amount in pool should be 63419584.000000000887874176 before the
 	// integer portion will be sent to the protocol pool as sdk.Coins
 	// decimal version will remain as "dust"
-	expectedCommunityPool := sdk.NewDecCoins(sdk.NewDecCoinFromDec(sdk.DefaultBondDenom, math.LegacyMustNewDecFromStr("0.800000001243023848")))
-	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, protocolpooltypes.ProtocolPoolEscrowAccount, sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 12683916))).Return(nil).Times(1)
+	expectedCommunityPool := sdk.NewDecCoins(sdk.NewDecCoinFromDec(sdk.DefaultBondDenom, math.LegacyMustNewDecFromStr("0.000000000887874176")))
+	ts.bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, protocolpooltypes.ProtocolPoolEscrowAccount, sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 63419584))).Return(nil).Times(1)
 
 	feePoolBefore, err := ts.distrKeeper.FeePool.Get(ctx)
 	require.NoError(t, err)

@@ -597,7 +597,7 @@ The distribution module contains the following parameters:
 
 | Key                 | Type         | Example                    |
 | ------------------- | ------------ | -------------------------- |
-| communitytax        | string (dec) | "0.020000000000000000" [0] |
+| communitytax        | string (dec) | "0.100000000000000000" [0] |
 | withdrawaddrenabled | bool         | true                       |
 
 * [0] `communitytax` must be positive and cannot exceed 1.00.
@@ -685,7 +685,7 @@ Example Output:
 ```yml
 base_proposer_reward: "0.000000000000000000"
 bonus_proposer_reward: "0.000000000000000000"
-community_tax: "0.020000000000000000"
+community_tax: "0.100000000000000000"
 withdraw_addr_enabled: true
 ```
 

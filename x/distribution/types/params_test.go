@@ -46,5 +46,7 @@ func TestParams_ValidateBasic(t *testing.T) {
 }
 
 func TestDefaultParams(t *testing.T) {
-	require.NoError(t, types.DefaultParams().ValidateBasic())
+	params := types.DefaultParams()
+	require.NoError(t, params.ValidateBasic())
+	require.Equal(t, sdkmath.LegacyNewDecWithPrec(1, 1), params.CommunityTax)
 }

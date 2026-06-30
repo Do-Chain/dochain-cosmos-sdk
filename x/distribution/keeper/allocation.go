@@ -35,20 +35,39 @@ func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bo
 		return err
 	}
 
-	if totalPreviousPower == 0 {
-		feePool.CommunityPool = feePool.CommunityPool.Add(feesCollected...)
-		return k.FeePool.Set(ctx, feePool)
-	}
-
 	// calculate fraction allocated to validators
 	remaining := feesCollected
-	communityTax, err := k.GetCommunityTax(ctx)
-	if err != nil {
-		return err
+	var feeMultiplier sdk.DecCoins
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if types.IsBuybackLiquidityFeeSplitActive(sdkCtx.ChainID(), sdkCtx.BlockHeight()) {
+		// Gas fees are split 20% to buyback/liquidity, 70% to validator rewards,
+		// and the remainder to the community pool. The buyback/liquidity module
+		// account can only hold integer Coins, so fractional dust remains in
+		// distribution accounting and is swept into the community pool below.
+		buybackLiquidityShare := feesCollected.MulDecTruncate(types.BuybackLiquidityPoolFeeShare())
+		buybackLiquidityCoins, _ := buybackLiquidityShare.TruncateDecimal()
+		if !buybackLiquidityCoins.IsZero() {
+			err = k.bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, types.BuybackLiquidityPoolName, buybackLiquidityCoins)
+			if err != nil {
+				return err
+			}
+		}
+		remaining = feesCollected.Sub(sdk.NewDecCoinsFromCoins(buybackLiquidityCoins...))
+		feeMultiplier = feesCollected.MulDecTruncate(types.ValidatorRewardsFeeShare())
+	} else {
+		communityTax, err := k.GetCommunityTax(ctx)
+		if err != nil {
+			return err
+		}
+
+		voteMultiplier := math.LegacyOneDec().Sub(communityTax)
+		feeMultiplier = feesCollected.MulDecTruncate(voteMultiplier)
 	}
 
-	voteMultiplier := math.LegacyOneDec().Sub(communityTax)
-	feeMultiplier := feesCollected.MulDecTruncate(voteMultiplier)
+	if totalPreviousPower == 0 {
+		feePool.CommunityPool = feePool.CommunityPool.Add(remaining...)
+		return k.FeePool.Set(ctx, feePool)
+	}
 
 	// allocate tokens proportionally to voting power
 	//

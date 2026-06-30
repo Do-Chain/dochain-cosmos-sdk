@@ -31,7 +31,11 @@ func TestAllocateTokensToValidatorWithCommission(t *testing.T) {
 	storeService := runtime.NewKVStoreService(key)
 	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
 	encCfg := moduletestutil.MakeTestEncodingConfig(distribution.AppModuleBasic{})
-	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{Time: time.Now()})
+	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{
+		ChainID: disttypes.DoChainMainnetChainID,
+		Height:  disttypes.GasFeeSplitUpgradeHeight,
+		Time:    time.Now(),
+	}).WithChainID(disttypes.DoChainMainnetChainID)
 
 	bankKeeper := distrtestutil.NewMockBankKeeper(ctrl)
 	stakingKeeper := distrtestutil.NewMockStakingKeeper(ctrl)
@@ -88,7 +92,11 @@ func TestAllocateTokensToManyValidators(t *testing.T) {
 	storeService := runtime.NewKVStoreService(key)
 	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
 	encCfg := moduletestutil.MakeTestEncodingConfig(distribution.AppModuleBasic{})
-	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{Time: time.Now()})
+	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{
+		ChainID: disttypes.DoChainMainnetChainID,
+		Height:  disttypes.GasFeeSplitUpgradeHeight,
+		Time:    time.Now(),
+	}).WithChainID(disttypes.DoChainMainnetChainID)
 
 	bankKeeper := distrtestutil.NewMockBankKeeper(ctrl)
 	stakingKeeper := distrtestutil.NewMockStakingKeeper(ctrl)
@@ -167,8 +175,10 @@ func TestAllocateTokensToManyValidators(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(100)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(20)))
 	bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
@@ -180,39 +190,39 @@ func TestAllocateTokensToManyValidators(t *testing.T) {
 	}
 	require.NoError(t, distrKeeper.AllocateTokens(ctx, 200, votes))
 
-	// 98 outstanding rewards (100 less 2 to community pool)
+	// 70 outstanding rewards, distributed evenly among the two validators.
 	val0OutstandingRewards, err = distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr0)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val0OutstandingRewards.Rewards)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val0OutstandingRewards.Rewards)
 
 	val1OutstandingRewards, err = distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr1)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1OutstandingRewards.Rewards)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1OutstandingRewards.Rewards)
 
-	// 2 community pool coins
+	// 10 community pool coins
 	feePool, err = distrKeeper.FeePool.Get(ctx)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(2)}}, feePool.CommunityPool)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(10)}}, feePool.CommunityPool)
 
-	// 50% commission for first proposer, (0.5 * 98%) * 100 / 2 = 23.25
+	// 50% commission for first validator, 0.5 * 35 = 17.5
 	val0Commission, err = distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr0)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0Commission.Commission)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0Commission.Commission)
 
 	// zero commission for second proposer
 	val1Commission, err = distrKeeper.GetValidatorAccumulatedCommission(ctx, valAddr1)
 	require.NoError(t, err)
 	require.True(t, val1Commission.Commission.IsZero())
 
-	// just staking.proportional for first proposer less commission = (0.5 * 98%) * 100 / 2 = 24.50
+	// staking-proportional rewards for first validator less commission.
 	val0CurrentRewards, err = distrKeeper.GetValidatorCurrentRewards(ctx, valAddr0)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(2450, 2)}}, val0CurrentRewards.Rewards)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0CurrentRewards.Rewards)
 
-	// proposer reward + staking.proportional for second proposer = (0.5 * (98%)) * 100 = 49
+	// staking-proportional rewards for second validator.
 	val1CurrentRewards, err = distrKeeper.GetValidatorCurrentRewards(ctx, valAddr1)
 	require.NoError(t, err)
-	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(490, 1)}}, val1CurrentRewards.Rewards)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1CurrentRewards.Rewards)
 }
 
 func TestAllocateTokensTruncation(t *testing.T) {
@@ -221,7 +231,11 @@ func TestAllocateTokensTruncation(t *testing.T) {
 	storeService := runtime.NewKVStoreService(key)
 	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
 	encCfg := moduletestutil.MakeTestEncodingConfig(distribution.AppModuleBasic{})
-	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{Time: time.Now()})
+	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{
+		ChainID: disttypes.DoChainMainnetChainID,
+		Height:  disttypes.GasFeeSplitUpgradeHeight,
+		Time:    time.Now(),
+	}).WithChainID(disttypes.DoChainMainnetChainID)
 
 	bankKeeper := distrtestutil.NewMockBankKeeper(ctrl)
 	stakingKeeper := distrtestutil.NewMockStakingKeeper(ctrl)
@@ -311,8 +325,10 @@ func TestAllocateTokensTruncation(t *testing.T) {
 
 	// allocate tokens as if both had voted and second was proposer
 	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(634195840)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(126839168)))
 	bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
 	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
 
 	votes := []abci.VoteInfo{
 		{
