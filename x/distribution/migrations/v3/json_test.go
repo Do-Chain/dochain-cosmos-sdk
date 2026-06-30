@@ -51,7 +51,7 @@ func TestMigrateJSON(t *testing.T) {
 	"params": {
 		"base_proposer_reward": "0.000000000000000000",
 		"bonus_proposer_reward": "0.000000000000000000",
-		"community_tax": "0.020000000000000000",
+		"community_tax": "0.100000000000000000",
 		"withdraw_addr_enabled": true
 	},
 	"previous_proposer": "",
