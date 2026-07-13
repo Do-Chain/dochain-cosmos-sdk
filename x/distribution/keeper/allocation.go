@@ -12,9 +12,14 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
+type validatorRewardWeight struct {
+	validator stakingtypes.ValidatorI
+	weight    math.Int
+}
+
 // AllocateTokens performs reward and fee distribution to all validators based
 // on the F1 fee distribution specification.
-func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bondedVotes []abci.VoteInfo) error {
+func (k Keeper) AllocateTokens(ctx context.Context, _ int64, bondedVotes []abci.VoteInfo) error {
 	// fetch and clear the collected fees for distribution, since this is
 	// called in BeginBlock, collected fees will be from the previous block
 	// (and distributed to the previous proposer)
@@ -64,30 +69,45 @@ func (k Keeper) AllocateTokens(ctx context.Context, totalPreviousPower int64, bo
 		feeMultiplier = feesCollected.MulDecTruncate(voteMultiplier)
 	}
 
-	if totalPreviousPower == 0 {
-		feePool.CommunityPool = feePool.CommunityPool.Add(remaining...)
-		return k.FeePool.Set(ctx, feePool)
-	}
-
-	// allocate tokens proportionally to voting power
-	//
-	// TODO: Consider parallelizing later
-	//
-	// Ref: https://github.com/cosmos/cosmos-sdk/pull/3099#discussion_r246276376
+	rewardWeights := make([]validatorRewardWeight, 0, len(bondedVotes))
+	totalRewardWeight := math.ZeroInt()
 	for _, vote := range bondedVotes {
 		validator, err := k.stakingKeeper.ValidatorByConsAddr(ctx, vote.Validator.Address)
 		if err != nil {
 			return err
 		}
 
+		weight := validator.GetTokens()
+		if weight.IsZero() {
+			continue
+		}
+
+		rewardWeights = append(rewardWeights, validatorRewardWeight{
+			validator: validator,
+			weight:    weight,
+		})
+		totalRewardWeight = totalRewardWeight.Add(weight)
+	}
+
+	if totalRewardWeight.IsZero() {
+		feePool.CommunityPool = feePool.CommunityPool.Add(remaining...)
+		return k.FeePool.Set(ctx, feePool)
+	}
+
+	// Allocate tokens proportionally to validator DO stake. Consensus validator
+	// power can be equalized separately without changing delegator reward APR.
+	//
+	// TODO: Consider parallelizing later
+	//
+	// Ref: https://github.com/cosmos/cosmos-sdk/pull/3099#discussion_r246276376
+	for _, rewardWeight := range rewardWeights {
 		// TODO: Consider micro-slashing for missing votes.
 		//
 		// Ref: https://github.com/cosmos/cosmos-sdk/issues/2525#issuecomment-430838701
-		powerFraction := math.LegacyNewDec(vote.Validator.Power).QuoTruncate(math.LegacyNewDec(totalPreviousPower))
-		reward := feeMultiplier.MulDecTruncate(powerFraction)
+		stakeFraction := math.LegacyNewDecFromInt(rewardWeight.weight).QuoTruncate(math.LegacyNewDecFromInt(totalRewardWeight))
+		reward := feeMultiplier.MulDecTruncate(stakeFraction)
 
-		err = k.AllocateTokensToValidator(ctx, validator, reward)
-		if err != nil {
+		if err := k.AllocateTokensToValidator(ctx, rewardWeight.validator, reward); err != nil {
 			return err
 		}
 

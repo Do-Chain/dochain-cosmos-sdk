@@ -225,6 +225,81 @@ func TestAllocateTokensToManyValidators(t *testing.T) {
 	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDec(35)}}, val1CurrentRewards.Rewards)
 }
 
+func TestAllocateTokensUsesStakeWeightNotConsensusPower(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	key := storetypes.NewKVStoreKey(disttypes.StoreKey)
+	storeService := runtime.NewKVStoreService(key)
+	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
+	encCfg := moduletestutil.MakeTestEncodingConfig(distribution.AppModuleBasic{})
+	ctx := testCtx.Ctx.WithBlockHeader(cmtproto.Header{
+		ChainID: disttypes.DoChainMainnetChainID,
+		Height:  disttypes.GasFeeSplitUpgradeHeight,
+		Time:    time.Now(),
+	}).WithChainID(disttypes.DoChainMainnetChainID)
+
+	bankKeeper := distrtestutil.NewMockBankKeeper(ctrl)
+	stakingKeeper := distrtestutil.NewMockStakingKeeper(ctrl)
+	accountKeeper := distrtestutil.NewMockAccountKeeper(ctrl)
+
+	feeCollectorAcc := authtypes.NewEmptyModuleAccount("fee_collector")
+	accountKeeper.EXPECT().GetModuleAddress("distribution").Return(distrAcc.GetAddress())
+	accountKeeper.EXPECT().GetModuleAccount(gomock.Any(), "fee_collector").Return(feeCollectorAcc)
+	stakingKeeper.EXPECT().ValidatorAddressCodec().Return(address.NewBech32Codec("cosmosvaloper")).AnyTimes()
+
+	distrKeeper := keeper.NewKeeper(
+		encCfg.Codec,
+		storeService,
+		accountKeeper,
+		bankKeeper,
+		stakingKeeper,
+		"fee_collector",
+		authtypes.NewModuleAddress("gov").String(),
+	)
+
+	require.NoError(t, distrKeeper.Params.Set(ctx, disttypes.DefaultParams()))
+	require.NoError(t, distrKeeper.FeePool.Set(ctx, disttypes.InitialFeePool()))
+
+	valAddr0 := sdk.ValAddress(valConsAddr0)
+	val0, err := distrtestutil.CreateValidator(valConsPk0, math.NewInt(100))
+	require.NoError(t, err)
+	stakingKeeper.EXPECT().ValidatorByConsAddr(gomock.Any(), sdk.GetConsAddress(valConsPk0)).Return(val0, nil).AnyTimes()
+
+	valAddr1 := sdk.ValAddress(valConsAddr1)
+	val1, err := distrtestutil.CreateValidator(valConsPk1, math.NewInt(300))
+	require.NoError(t, err)
+	stakingKeeper.EXPECT().ValidatorByConsAddr(gomock.Any(), sdk.GetConsAddress(valConsPk1)).Return(val1, nil).AnyTimes()
+
+	fees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(100)))
+	buybackLiquidityFees := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(20)))
+	bankKeeper.EXPECT().GetAllBalances(gomock.Any(), feeCollectorAcc.GetAddress()).Return(fees)
+	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), "fee_collector", disttypes.ModuleName, fees)
+	bankKeeper.EXPECT().SendCoinsFromModuleToModule(gomock.Any(), disttypes.ModuleName, disttypes.BuybackLiquidityPoolName, buybackLiquidityFees)
+
+	votes := []abci.VoteInfo{
+		{
+			Validator: abci.Validator{
+				Address: valConsPk0.Address(),
+				Power:   1,
+			},
+		},
+		{
+			Validator: abci.Validator{
+				Address: valConsPk1.Address(),
+				Power:   1,
+			},
+		},
+	}
+	require.NoError(t, distrKeeper.AllocateTokens(ctx, 2, votes))
+
+	val0OutstandingRewards, err := distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr0)
+	require.NoError(t, err)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(175, 1)}}, val0OutstandingRewards.Rewards)
+
+	val1OutstandingRewards, err := distrKeeper.GetValidatorOutstandingRewards(ctx, valAddr1)
+	require.NoError(t, err)
+	require.Equal(t, sdk.DecCoins{{Denom: sdk.DefaultBondDenom, Amount: math.LegacyNewDecWithPrec(525, 1)}}, val1OutstandingRewards.Rewards)
+}
+
 func TestAllocateTokensTruncation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	key := storetypes.NewKVStoreKey(disttypes.StoreKey)
