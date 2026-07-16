@@ -77,8 +77,8 @@ index-events = [{{ range .BaseConfig.IndexEvents }}{{ printf "%q, " . }}{{end}}]
 # IavlCacheSize set the size of the iavl tree cache (in number of nodes).
 iavl-cache-size = {{ .BaseConfig.IAVLCacheSize }}
 
-# IAVLDisableFastNode enables or disables the fast node feature of IAVL. 
-# Default is false.
+# IAVLDisableFastNode enables or disables the fast node feature of IAVL.
+# Default is true for Do-Chain bootstrap safety.
 iavl-disable-fastnode = {{ .BaseConfig.IAVLDisableFastNode }}
 
 # AppDBBackend defines the database backend type to use for the application and snapshots DBs.

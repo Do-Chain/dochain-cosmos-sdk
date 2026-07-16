@@ -251,7 +251,7 @@ func DefaultConfig() *Config {
 			MinRetainBlocks:     0,
 			IndexEvents:         make([]string, 0),
 			IAVLCacheSize:       781250,
-			IAVLDisableFastNode: false,
+			IAVLDisableFastNode: true,
 			AppDBBackend:        "",
 		},
 		Telemetry: telemetry.Config{
