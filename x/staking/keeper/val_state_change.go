@@ -264,13 +264,9 @@ func (k Keeper) ApplyAndReturnValidatorSetUpdates(ctx context.Context) (updates 
 		}
 	}
 
-	// set the list of validator updates only when the validator set changes.
-	// DoChain keeps an equal-power active-set record in the staking store; an
-	// empty update here must not clear that record every replay block.
-	if len(updates) > 0 {
-		if err = k.SetValidatorUpdates(ctx, updates); err != nil {
-			return nil, err
-		}
+	// set the list of validator updates
+	if err = k.SetValidatorUpdates(ctx, updates); err != nil {
+		return nil, err
 	}
 
 	return updates, err
