@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -15,6 +16,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/staking/types"
 )
+
+const doChainReplayWriteOptimizationHeight int64 = 2547000
 
 // Implements ValidatorSet interface
 var _ types.ValidatorSet = Keeper{}
@@ -153,6 +156,15 @@ func (k Keeper) SetValidatorUpdates(ctx context.Context, valUpdates []abci.Valid
 	if err != nil {
 		return err
 	}
+	if doChainReplayWriteOptimizationActive(ctx) {
+		existing, err := store.Get(types.ValidatorUpdatesKey)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(existing, bz) {
+			return nil
+		}
+	}
 	return store.Set(types.ValidatorUpdatesKey, bz)
 }
 
@@ -164,6 +176,10 @@ func (k Keeper) GetValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpdate
 		return nil, err
 	}
 
+	if bz == nil && doChainReplayWriteOptimizationActive(ctx) {
+		return nil, nil
+	}
+
 	var valUpdates types.ValidatorUpdates
 	err = k.cdc.Unmarshal(bz, &valUpdates)
 	if err != nil {
@@ -171,4 +187,8 @@ func (k Keeper) GetValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpdate
 	}
 
 	return valUpdates.Updates, nil
+}
+
+func doChainReplayWriteOptimizationActive(ctx context.Context) bool {
+	return sdk.UnwrapSDKContext(ctx).BlockHeight() >= doChainReplayWriteOptimizationHeight
 }

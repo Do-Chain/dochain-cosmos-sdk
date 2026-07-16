@@ -264,9 +264,11 @@ func (k Keeper) ApplyAndReturnValidatorSetUpdates(ctx context.Context) (updates 
 		}
 	}
 
-	// set the list of validator updates
-	if err = k.SetValidatorUpdates(ctx, updates); err != nil {
-		return nil, err
+	// Preserve historical store writes before the coordinated activation height.
+	if len(updates) > 0 || !doChainReplayWriteOptimizationActive(ctx) {
+		if err = k.SetValidatorUpdates(ctx, updates); err != nil {
+			return nil, err
+		}
 	}
 
 	return updates, err
