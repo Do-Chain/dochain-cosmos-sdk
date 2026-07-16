@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -153,6 +154,15 @@ func (k Keeper) SetValidatorUpdates(ctx context.Context, valUpdates []abci.Valid
 	if err != nil {
 		return err
 	}
+
+	existing, err := store.Get(types.ValidatorUpdatesKey)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(existing, bz) {
+		return nil
+	}
+
 	return store.Set(types.ValidatorUpdatesKey, bz)
 }
 
@@ -162,6 +172,9 @@ func (k Keeper) GetValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpdate
 	bz, err := store.Get(types.ValidatorUpdatesKey)
 	if err != nil {
 		return nil, err
+	}
+	if bz == nil {
+		return nil, nil
 	}
 
 	var valUpdates types.ValidatorUpdates

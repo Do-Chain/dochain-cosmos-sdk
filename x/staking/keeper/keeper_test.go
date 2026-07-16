@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"testing"
 
+	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttime "github.com/cometbft/cometbft/types/time"
 	"github.com/stretchr/testify/suite"
@@ -108,6 +109,31 @@ func (s *KeeperTestSuite) TestLastTotalPower() {
 	resTotalPower, err := keeper.GetLastTotalPower(ctx)
 	require.NoError(err)
 	require.True(expTotalPower.Equal(resTotalPower))
+}
+
+func (s *KeeperTestSuite) TestValidatorUpdatesPreservedOnEmptyBlock() {
+	ctx, keeper := s.ctx, s.stakingKeeper
+	require := s.Require()
+
+	updates, err := keeper.GetValidatorUpdates(ctx)
+	require.NoError(err)
+	require.Nil(updates)
+
+	valPubKey := PKs[0]
+	valAddr := sdk.ValAddress(valPubKey.Address().Bytes())
+	validator := stakingtestutil.NewValidator(s.T(), valAddr, valPubKey)
+	validator, _ = validator.AddTokensFromDel(keeper.TokensFromConsensusPower(ctx, 10))
+
+	expected := []abci.ValidatorUpdate{validator.ABCIValidatorUpdate(keeper.PowerReduction(ctx))}
+	require.NoError(keeper.SetValidatorUpdates(ctx, expected))
+
+	emptyUpdates, err := keeper.ApplyAndReturnValidatorSetUpdates(ctx)
+	require.NoError(err)
+	require.Empty(emptyUpdates)
+
+	storedUpdates, err := keeper.GetValidatorUpdates(ctx)
+	require.NoError(err)
+	require.Equal(expected, storedUpdates)
 }
 
 func TestKeeperTestSuite(t *testing.T) {
