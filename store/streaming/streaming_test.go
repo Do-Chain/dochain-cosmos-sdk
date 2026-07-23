@@ -2,8 +2,11 @@ package streaming
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -104,6 +107,37 @@ func (s *PluginTestSuite) SetupTest() {
 
 func TestPluginTestSuite(t *testing.T) {
 	suite.Run(t, new(PluginTestSuite))
+}
+
+func TestParsePluginCommand(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "listener")
+
+	args, err := parsePluginCommand(executable + ` --flag "two words" 'three words'`)
+	require.NoError(t, err)
+	require.Equal(t, []string{executable, "--flag", "two words", "three words"}, args)
+}
+
+func TestParsePluginCommandRejectsRelativeExecutable(t *testing.T) {
+	_, err := parsePluginCommand("listener --flag value")
+	require.ErrorContains(t, err, "absolute path")
+}
+
+func TestVerifyPluginChecksum(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "listener")
+	require.NoError(t, os.WriteFile(executable, []byte("plugin"), 0o700))
+
+	sum := sha256.Sum256([]byte("plugin"))
+	t.Setenv(GetPluginChecksumEnvKey("abci"), hex.EncodeToString(sum[:]))
+
+	require.NoError(t, verifyPluginChecksum("abci", executable))
+}
+
+func TestVerifyPluginChecksumMismatch(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "listener")
+	require.NoError(t, os.WriteFile(executable, []byte("plugin"), 0o700))
+	t.Setenv(GetPluginChecksumEnvKey("abci"), "00")
+
+	require.ErrorContains(t, verifyPluginChecksum("abci", executable), "checksum mismatch")
 }
 
 func (s *PluginTestSuite) TestABCIGRPCPlugin() {

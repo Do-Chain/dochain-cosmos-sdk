@@ -62,12 +62,12 @@ func InitializeNodeValidatorFilesFromMnemonic(config *cfg.Config, mnemonic strin
 	nodeID = string(nodeKey.ID())
 
 	pvKeyFile := config.PrivValidatorKeyFile()
-	if err := os.MkdirAll(filepath.Dir(pvKeyFile), 0o777); err != nil {
+	if err := os.MkdirAll(filepath.Dir(pvKeyFile), 0o700); err != nil {
 		return "", nil, fmt.Errorf("could not create directory %q: %w", filepath.Dir(pvKeyFile), err)
 	}
 
 	pvStateFile := config.PrivValidatorStateFile()
-	if err := os.MkdirAll(filepath.Dir(pvStateFile), 0o777); err != nil {
+	if err := os.MkdirAll(filepath.Dir(pvStateFile), 0o700); err != nil {
 		return "", nil, fmt.Errorf("could not create directory %q: %w", filepath.Dir(pvStateFile), err)
 	}
 

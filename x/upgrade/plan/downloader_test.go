@@ -24,7 +24,7 @@ type DownloaderTestSuite struct {
 
 func (s *DownloaderTestSuite) SetupTest() {
 	s.Home = s.T().TempDir()
-	s.Assert().NoError(os.MkdirAll(filepath.Join(s.Home, "src"), 0o777), "creating src/ dir")
+	s.Assert().NoError(os.MkdirAll(filepath.Join(s.Home, "src"), 0o700), "creating src/ dir")
 	s.T().Logf("Home: [%s]", s.Home)
 }
 
@@ -214,7 +214,7 @@ func (s *DownloaderTestSuite) TestEnsureBinary() {
 	nonExeName := s.saveSrcTestFile(NewTestFile("non-exe.txt", "Not executable"))
 	s.Require().NoError(os.Chmod(nonExeName, 0o600), "chmod error nonExeName")
 	isExeName := s.saveSrcTestFile(NewTestFile("is-exe.sh", "#!/bin/bash\necho 'executing'\n"))
-	s.Require().NoError(os.Chmod(isExeName, 0o777), "chmod error isExeName")
+	s.Require().NoError(os.Chmod(isExeName, 0o700), "chmod error isExeName")
 
 	s.T().Run("file does not exist", func(t *testing.T) {
 		name := filepath.Join(s.Home, "does-not-exist.txt")

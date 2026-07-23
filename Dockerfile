@@ -40,16 +40,20 @@ ARG TARGETOS TARGETARCH
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH make build
 
 # Use alpine:3 as a base image
-FROM alpine:3
+FROM alpine:3.23
 
 EXPOSE 26656 26657 1317 9090
 # Run simd by default, omit entrypoint to ease using container with simcli
 CMD ["simd"]
 STOPSIGNAL SIGTERM
-WORKDIR /root
+WORKDIR /home/simapp
 
 # Install minimum necessary dependencies
-RUN apk add --no-cache curl make bash jq sed
+RUN apk add --no-cache curl make bash jq sed && \
+    addgroup -g 1000 simapp && \
+    adduser -u 1000 -G simapp -D -h /home/simapp simapp
 
 # Copy over binaries from the build-env
 COPY --from=build-env /go/src/github.com/cosmos/cosmos-sdk/build/simd /usr/bin/simd
+
+USER simapp

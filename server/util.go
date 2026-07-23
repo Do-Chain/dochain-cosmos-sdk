@@ -492,7 +492,7 @@ func openTraceWriter(traceWriterFile string) (w io.WriteCloser, err error) {
 	return os.OpenFile(
 		traceWriterFile,
 		os.O_WRONLY|os.O_APPEND|os.O_CREATE,
-		0o666,
+		0o600,
 	)
 }
 
