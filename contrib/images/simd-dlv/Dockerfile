@@ -1,7 +1,7 @@
 FROM golang:1.23-alpine AS build
 
 RUN apk add build-base git linux-headers libc-dev
-RUN go install github.com/go-delve/delve/cmd/dlv@latest
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.27.0
 
 WORKDIR /work
 COPY go.mod go.sum /work/
@@ -20,7 +20,7 @@ COPY ./ /work
 RUN LEDGER_ENABLED=false make COSMOS_BUILD_OPTIONS="debug,nostrip" clean build
 
 
-FROM alpine AS run
+FROM alpine:3.24 AS run
 RUN apk add bash curl jq
 EXPOSE 26656 26657
 ENTRYPOINT ["/usr/bin/wrapper.sh"]

@@ -14,8 +14,8 @@ that all the aforementioned commands are installed and available
 in the user's search `$PATH` environment variable:
 
 ```shell
-go install golang.org/x/tools/cmd/goimports
-go install github.com/golangci/misspell/cmd/misspell@master
+go install golang.org/x/tools/cmd/goimports@v0.48.0
+go install github.com/golangci/misspell/cmd/misspell@v0.8.0
 ```
 
 It also runs `go mod tidy` and `golangci-lint` if available.

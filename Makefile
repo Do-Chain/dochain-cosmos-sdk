@@ -148,7 +148,7 @@ mocks: $(MOCKS_DIR)
 
 
 vulncheck: $(BUILDDIR)/
-	GOBIN=$(BUILDDIR) go install golang.org/x/vuln/cmd/govulncheck@latest
+	GOBIN=$(BUILDDIR) go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 	$(BUILDDIR)/govulncheck ./...
 
 $(MOCKS_DIR):
@@ -179,7 +179,7 @@ go.sum: go.mod
 
 godocs:
 	@echo "--> Wait a few seconds and visit http://localhost:6060/pkg/github.com/cosmos/cosmos-sdk/types"
-	go install golang.org/x/tools/cmd/godoc@latest
+	go install golang.org/x/tools/cmd/godoc@v0.48.0
 	godoc -http=:6060
 
 build-docs:

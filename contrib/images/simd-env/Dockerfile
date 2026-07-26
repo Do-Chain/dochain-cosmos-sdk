@@ -20,7 +20,7 @@ COPY ./ /work
 RUN LEDGER_ENABLED=false make clean build
 
 
-FROM alpine AS run
+FROM alpine:3.24 AS run
 RUN apk add bash curl jq
 EXPOSE 26656 26657
 ENTRYPOINT ["/usr/bin/wrapper.sh"]

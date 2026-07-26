@@ -117,7 +117,7 @@ The following snippet shows how to query the state using gRPC inside a Go progra
 
 
 ```bash
-go get github.com/cosmos/cosmos-sdk@main
+go get github.com/cosmos/cosmos-sdk@vX.Y.Z
 ```
 
 ```go
