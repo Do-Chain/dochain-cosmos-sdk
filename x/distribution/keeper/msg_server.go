@@ -15,6 +15,8 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 )
 
+const nativeValidatorRewardDenom = "udo"
+
 type msgServer struct {
 	Keeper
 }
@@ -181,6 +183,18 @@ func (k msgServer) DepositValidatorRewardsPool(ctx context.Context, msg *types.M
 	depositor, err := k.authKeeper.AddressCodec().StringToBytes(msg.Depositor)
 	if err != nil {
 		return nil, err
+	}
+	if err := validateAmount(msg.Amount); err != nil {
+		return nil, err
+	}
+	for _, coin := range msg.Amount {
+		if coin.Denom != nativeValidatorRewardDenom {
+			return nil, errors.Wrapf(
+				sdkerrors.ErrInvalidCoins,
+				"direct validator reward deposits only accept %s; use x/validatorrewards campaigns for external reward denoms",
+				nativeValidatorRewardDenom,
+			)
+		}
 	}
 
 	// deposit coins from depositor's account to the distribution module
